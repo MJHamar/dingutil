@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Run the command and capture its exit code
+"$@"
+exit_code=$?
+
+# depending on the platform, choose the right sound command
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    player=afplay
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux
+    player=paplay
+else
+# no windows for now.
+    player=echo # placeholder
+fi
+
+SUCCESS_SOUND=sounds/classic-bike-bell-distorted-double-1.aiff
+ERROR_SOUND=sounds/bottlefullmute-1.wav
+
+if [ $exit_code -eq 0 ]; then
+    $player $SUCCESS_SOUND &
+else
+    $player $ERROR_SOUND &
+fi
+
+# Exit with the same code as the original command
+exit $exit_code
