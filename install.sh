@@ -75,7 +75,7 @@ mkdir -p "$SOUND_DIR"
 
 # Copy sound files
 echo "Installing sound files to $SOUND_DIR..."
-cp -f sounds/*.aiff sounds/*.wav "$SOUND_DIR/"
+cp -f sounds/*.wav "$SOUND_DIR/"
 
 # Create temporary file for the script with updated paths
 TEMP_SCRIPT=$(mktemp)

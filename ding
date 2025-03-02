@@ -16,7 +16,7 @@ else
     player=echo # placeholder
 fi
 
-SUCCESS_SOUND=sounds/classic-bike-bell-distorted-double-1.aiff
+SUCCESS_SOUND=sounds/classic-bike-bell-distorted-double-1.wav
 ERROR_SOUND=sounds/bottlefullmute-1.wav
 
 if [ $exit_code -eq 0 ]; then
