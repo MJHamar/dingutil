@@ -15,7 +15,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     player=afplay
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     # Linux
-    player=paplay
+    player='aplay -q'
 else
 # no windows for now.
     player=echo # placeholder
