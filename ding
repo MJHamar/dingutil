@@ -1,13 +1,42 @@
 #!/bin/bash
-if [[ "$1" = "--yeah" ]]; then
-    exit_code=0
-elif [[ "$1" = "--nope" ]]; then
-    exit_code=1
-else
-    # Run the command and capture its exit code
-    "$@"
-    exit_code=$?
-fi
+case "$1" in
+    --yeah)
+        exit_code=0
+        ;;
+    --nope)
+        exit_code=1
+        ;;
+    --code=* )
+        # support --code=NUMBER
+        code_val="${1#--code=}"
+        if [[ "$code_val" =~ ^[0-9]+$ ]]; then
+            exit_code=$code_val
+        else
+            echo "Invalid numeric code: $code_val" >&2
+            exit 2
+        fi
+        ;;
+    --code)
+        # support --code NUMBER
+        shift
+        code_val="$1"
+        if [[ -z "$code_val" ]]; then
+            echo "Missing numeric code after --code" >&2
+            exit 2
+        fi
+        if [[ "$code_val" =~ ^[0-9]+$ ]]; then
+            exit_code=$code_val
+        else
+            echo "Invalid numeric code: $code_val" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        # Run the command and capture its exit code
+        "$@"
+        exit_code=$?
+        ;;
+esac
 
 # depending on the platform, choose the right sound command
 if [[ "$OSTYPE" == "darwin"* ]]; then
