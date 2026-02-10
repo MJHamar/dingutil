@@ -1,0 +1,218 @@
+#!/bin/bash
+# dingconfig — Manage ding-smart notification configs
+#
+# Usage:
+#   dingconfig list                          List global toggles + all entries
+#   dingconfig show [path|default]           Show entry (defaults to $PWD)
+#   dingconfig set [path|default] [opts]     Add or modify (defaults to $PWD)
+#   dingconfig remove [path|default]         Remove entry (defaults to $PWD)
+#   dingconfig enable sound|blink            Enable a global toggle
+#   dingconfig disable sound|blink           Disable a global toggle
+#   dingconfig edit                           Open config in nvim
+#   dingconfig migrate                       Migrate old .dingconfig.json to new format
+#
+# Options for 'set':
+#   --soundfile <path>       Path to sound file
+#   --blink-color <color>    Flash color (name or #hex)
+
+set -euo pipefail
+
+GLOBAL_CONFIG="$HOME/.config/dingconfig.json"
+OLD_CONFIG="$HOME/.config/.dingconfig.json"
+
+# --- Helpers ---
+
+ensure_global() {
+    if [ ! -f "$GLOBAL_CONFIG" ]; then
+        mkdir -p "$(dirname "$GLOBAL_CONFIG")"
+        echo '{"sound":true,"blink":true,"default":{"soundfile":"","blink_color":"orange"}}' > "$GLOBAL_CONFIG"
+    fi
+}
+
+die() { echo "Error: $1" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+Usage:
+  dingconfig list                          List global toggles + all entries
+  dingconfig show [path|default]           Show entry (defaults to $PWD)
+  dingconfig set [path|default] [opts]     Add or modify (defaults to $PWD)
+  dingconfig remove [path|default]         Remove entry (defaults to $PWD)
+  dingconfig enable sound|blink            Enable a global toggle
+  dingconfig disable sound|blink           Disable a global toggle
+  dingconfig edit                           Open config in nvim
+  dingconfig migrate                       Migrate old .dingconfig.json to new format
+
+Options for 'set':
+  --soundfile <path>       Path to sound file
+  --blink-color <color>    Flash color (name or #hex)
+EOF
+    exit 0
+}
+
+# Returns true if the argument looks like a set option (starts with --)
+is_option() { [[ "$1" == --* ]]; }
+
+# --- Parse command ---
+
+[ $# -eq 0 ] && usage
+
+CMD="$1"; shift
+
+# --- Commands ---
+
+cmd_list() {
+    ensure_global
+    echo "Global config: $GLOBAL_CONFIG"
+    echo ""
+    local sound blink
+    sound=$(/usr/bin/jq -r '.sound' "$GLOBAL_CONFIG")
+    blink=$(/usr/bin/jq -r '.blink' "$GLOBAL_CONFIG")
+    echo "sound=$sound  blink=$blink"
+    echo ""
+    /usr/bin/jq -r 'to_entries[] | select(.value | type == "object") | "\(.key):\n  soundfile=\(.value.soundfile // "unset")  blink_color=\(.value.blink_color // "unset")\n"' "$GLOBAL_CONFIG"
+}
+
+cmd_show() {
+    local key="${1:-$PWD}"
+    ensure_global
+    local entry
+    entry=$(/usr/bin/jq -r --arg k "$key" '.[$k] // empty' "$GLOBAL_CONFIG")
+    [ -z "$entry" ] && die "No entry for '$key'"
+    echo "$entry" | /usr/bin/jq '.'
+}
+
+cmd_set() {
+    local key=""
+    local soundfile="" blink_color=""
+
+    # If the first arg exists and is not an option, treat it as the key
+    if [ $# -gt 0 ] && ! is_option "$1"; then
+        key="$1"; shift
+    else
+        key="$PWD"
+    fi
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --soundfile)   soundfile="$2"; shift 2 ;;
+            --blink-color) blink_color="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    ensure_global
+    local tmp; tmp=$(mktemp)
+    cp "$GLOBAL_CONFIG" "$tmp"
+
+    # Ensure the key exists with defaults
+    /usr/bin/jq --arg k "$key" '
+        if .[$k] == null then
+            .[$k] = {"soundfile":"","blink_color":"orange"}
+        else . end
+    ' "$tmp" > "$tmp.out" && mv "$tmp.out" "$tmp"
+
+    [ -n "$soundfile" ]   && /usr/bin/jq --arg k "$key" --arg v "$soundfile"   '.[$k].soundfile = $v'   "$tmp" > "$tmp.out" && mv "$tmp.out" "$tmp"
+    [ -n "$blink_color" ] && /usr/bin/jq --arg k "$key" --arg v "$blink_color" '.[$k].blink_color = $v' "$tmp" > "$tmp.out" && mv "$tmp.out" "$tmp"
+
+    /usr/bin/jq '.' "$tmp" > "$GLOBAL_CONFIG"
+    rm -f "$tmp"
+    echo "Updated '$key' in $GLOBAL_CONFIG:"
+    /usr/bin/jq --arg k "$key" '.[$k]' "$GLOBAL_CONFIG"
+}
+
+cmd_remove() {
+    local key="${1:-$PWD}"
+    ensure_global
+    local entry
+    entry=$(/usr/bin/jq -r --arg k "$key" '.[$k] // empty' "$GLOBAL_CONFIG")
+    [ -z "$entry" ] && die "No entry for '$key'"
+
+    local tmp; tmp=$(mktemp)
+    /usr/bin/jq --arg k "$key" 'del(.[$k])' "$GLOBAL_CONFIG" > "$tmp"
+    mv "$tmp" "$GLOBAL_CONFIG"
+    echo "Removed '$key' from $GLOBAL_CONFIG"
+}
+
+cmd_enable() {
+    [ $# -eq 0 ] && die "Usage: dingconfig enable sound|blink"
+    local toggle="$1"
+    case "$toggle" in
+        sound|blink) ;;
+        *) die "Unknown toggle '$toggle'. Must be 'sound' or 'blink'." ;;
+    esac
+    ensure_global
+    local tmp; tmp=$(mktemp)
+    /usr/bin/jq --arg k "$toggle" '.[$k] = true' "$GLOBAL_CONFIG" > "$tmp"
+    mv "$tmp" "$GLOBAL_CONFIG"
+    echo "Enabled $toggle"
+}
+
+cmd_disable() {
+    [ $# -eq 0 ] && die "Usage: dingconfig disable sound|blink"
+    local toggle="$1"
+    case "$toggle" in
+        sound|blink) ;;
+        *) die "Unknown toggle '$toggle'. Must be 'sound' or 'blink'." ;;
+    esac
+    ensure_global
+    local tmp; tmp=$(mktemp)
+    /usr/bin/jq --arg k "$toggle" '.[$k] = false' "$GLOBAL_CONFIG" > "$tmp"
+    mv "$tmp" "$GLOBAL_CONFIG"
+    echo "Disabled $toggle"
+}
+
+cmd_edit() {
+    ensure_global
+    nvim "$GLOBAL_CONFIG"
+}
+
+cmd_migrate() {
+    if [ ! -f "$OLD_CONFIG" ]; then
+        echo "No old config found at $OLD_CONFIG — nothing to migrate."
+        return
+    fi
+
+    # Back up old file
+    cp "$OLD_CONFIG" "${OLD_CONFIG}.bak"
+    echo "Backed up $OLD_CONFIG to ${OLD_CONFIG}.bak"
+
+    # Convert old format to new format
+    local tmp; tmp=$(mktemp)
+    /usr/bin/jq '
+        # Determine global sound/blink from default entry (or first entry)
+        ( .default // (to_entries | first | .value) // {} ) as $ref |
+        {
+            sound: (if ($ref.sound // "no") == "yes" then true else false end),
+            blink: (if ($ref.blink // "yes") == "yes" then true else false end)
+        } + (
+            [to_entries[] | {
+                key: .key,
+                value: {
+                    soundfile: (.value.soundfile // ""),
+                    blink_color: (.value.blink_color // "orange")
+                }
+            }] | from_entries
+        )
+    ' "$OLD_CONFIG" > "$tmp"
+
+    mkdir -p "$(dirname "$GLOBAL_CONFIG")"
+    /usr/bin/jq '.' "$tmp" > "$GLOBAL_CONFIG"
+    rm -f "$tmp"
+
+    echo "Migrated to $GLOBAL_CONFIG:"
+    /usr/bin/jq '.' "$GLOBAL_CONFIG"
+}
+
+case "$CMD" in
+    list)    cmd_list "$@" ;;
+    show)    cmd_show "$@" ;;
+    set)     cmd_set "$@" ;;
+    remove)  cmd_remove "$@" ;;
+    enable)  cmd_enable "$@" ;;
+    disable) cmd_disable "$@" ;;
+    edit)    cmd_edit "$@" ;;
+    migrate) cmd_migrate "$@" ;;
+    -h|--help|help) usage ;;
+    *) die "Unknown command: $CMD. Run 'dingconfig --help' for usage." ;;
+esac

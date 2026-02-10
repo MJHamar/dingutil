@@ -1,0 +1,86 @@
+#!/bin/bash
+# ding-smart — Config-driven notification sound + screen flash
+# Used as a Claude Code notification hook.
+#
+# Usage: ding-smart <PROJECT_ROOT>
+#
+# Config: ~/.config/dingconfig.json
+#   {
+#     "sound": true,
+#     "blink": true,
+#     "default": {
+#       "soundfile": "/path/to/sound.wav",
+#       "blink_color": "orange"
+#     },
+#     "/absolute/path/to/project": {
+#       "soundfile": "/path/to/custom.wav",
+#       "blink_color": "#FF2299"
+#     }
+#   }
+#
+# Resolution: root-level sound/blink booleans control toggles,
+# path entry (falling back to "default") provides soundfile + blink_color.
+
+set -euo pipefail
+
+FLASH_BIN="/Users/hamar.miklos/dingutil/flash-border"
+DEFAULT_SOUND="/Users/hamar.miklos/dingutil/sounds/mc-villager-huh.wav"
+DEFAULT_COLOR="orange"
+GLOBAL_CONFIG="$HOME/.config/dingconfig.json"
+
+# Platform-aware sound player
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SOUND_PLAYER="afplay"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    SOUND_PLAYER="aplay -q"
+else
+    SOUND_PLAYER="echo"
+fi
+
+# Platform-aware jq path
+JQ=$(command -v jq)
+
+# Drain stdin so the hook doesn't hang (Claude pipes JSON here)
+cat > /dev/null &
+
+PROJECT_ROOT="${1:-}"
+if [ -z "$PROJECT_ROOT" ]; then
+    echo "Usage: ding-smart <PROJECT_ROOT>" >&2
+    exit 1
+fi
+
+# --- Config resolution ---
+SOUND_ENABLED="true"
+SOUNDFILE="$DEFAULT_SOUND"
+BLINK_ENABLED="true"
+BLINK_COLOR="$DEFAULT_COLOR"
+
+if [ -f "$GLOBAL_CONFIG" ]; then
+    # Read root-level toggles
+    SOUND_ENABLED=$("$JQ" -r '.sound // true' "$GLOBAL_CONFIG")
+    BLINK_ENABLED=$("$JQ" -r '.blink // true' "$GLOBAL_CONFIG")
+
+    # Look up path entry, fall back to "default"
+    ENTRY=$("$JQ" -r --arg key "$PROJECT_ROOT" '.[$key] // empty' "$GLOBAL_CONFIG")
+    if [ -z "$ENTRY" ]; then
+        ENTRY=$("$JQ" -r '.default // empty' "$GLOBAL_CONFIG")
+    fi
+    if [ -n "$ENTRY" ]; then
+        SOUNDFILE=$(echo "$ENTRY" | "$JQ" -r ".soundfile // \"$DEFAULT_SOUND\"")
+        BLINK_COLOR=$(echo "$ENTRY" | "$JQ" -r ".blink_color // \"$DEFAULT_COLOR\"")
+        # If soundfile is empty string, fall back to default
+        [ -z "$SOUNDFILE" ] && SOUNDFILE="$DEFAULT_SOUND"
+    fi
+fi
+
+# --- Execute ---
+
+if [ "$SOUND_ENABLED" = "true" ] && [ -f "$SOUNDFILE" ]; then
+    $SOUND_PLAYER "$SOUNDFILE" &
+fi
+
+if [ "$BLINK_ENABLED" = "true" ] && [ -x "$FLASH_BIN" ]; then
+    "$FLASH_BIN" --color "$BLINK_COLOR" --width 6 --hold 0.4 --fade 0.3 &
+fi
+
+exit 0
