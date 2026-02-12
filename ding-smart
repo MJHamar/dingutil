@@ -50,27 +50,47 @@ if [ -z "$PROJECT_ROOT" ]; then
 fi
 
 # --- Config resolution ---
-SOUND_ENABLED="true"
-SOUNDFILE="$DEFAULT_SOUND"
-BLINK_ENABLED="true"
-BLINK_COLOR="$DEFAULT_COLOR"
+# Single jq call resolves: global toggles, path→default fallback,
+# and explicit "default" values against the default entry.
+RESOLVED=$(
+    "$JQ" -r \
+        --arg key "$PROJECT_ROOT" \
+        --arg fallback_sound "$DEFAULT_SOUND" \
+        --arg fallback_color "$DEFAULT_COLOR" \
+    '
+      (if .sound == null then true else .sound end) as $sound |
+      (if .blink == null then true else .blink end) as $blink |
+      .default          as $def   |
+      (.[$key] // $def // {}) as $entry |
 
-if [ -f "$GLOBAL_CONFIG" ]; then
-    # Read root-level toggles
-    SOUND_ENABLED=$("$JQ" -r '.sound // true' "$GLOBAL_CONFIG")
-    BLINK_ENABLED=$("$JQ" -r '.blink // true' "$GLOBAL_CONFIG")
+      # resolve soundfile: entry → default entry → hardcoded
+      (($entry.soundfile // "default")
+        | if . == "default" or . == "" then
+            (($def.soundfile // "default")
+              | if . == "default" or . == "" then $fallback_sound else . end)
+          else . end) as $sf |
 
-    # Look up path entry, fall back to "default"
-    ENTRY=$("$JQ" -r --arg key "$PROJECT_ROOT" '.[$key] // empty' "$GLOBAL_CONFIG")
-    if [ -z "$ENTRY" ]; then
-        ENTRY=$("$JQ" -r '.default // empty' "$GLOBAL_CONFIG")
-    fi
-    if [ -n "$ENTRY" ]; then
-        SOUNDFILE=$(echo "$ENTRY" | "$JQ" -r ".soundfile // \"$DEFAULT_SOUND\"")
-        BLINK_COLOR=$(echo "$ENTRY" | "$JQ" -r ".blink_color // \"$DEFAULT_COLOR\"")
-        # If soundfile is empty string, fall back to default
-        [ -z "$SOUNDFILE" ] && SOUNDFILE="$DEFAULT_SOUND"
-    fi
+      # resolve blink_color: entry → default entry → hardcoded
+      (($entry.blink_color // "default")
+        | if . == "default" or . == "" then
+            (($def.blink_color // "default")
+              | if . == "default" or . == "" then $fallback_color else . end)
+          else . end) as $bc |
+
+      [$sound, $blink, $sf, $bc] | join("\n")
+    ' "$GLOBAL_CONFIG" 2>/dev/null
+) || RESOLVED=""
+
+if [ -n "$RESOLVED" ]; then
+    SOUND_ENABLED=$(sed -n '1p' <<< "$RESOLVED")
+    BLINK_ENABLED=$(sed -n '2p' <<< "$RESOLVED")
+    SOUNDFILE=$(sed -n '3p' <<< "$RESOLVED")
+    BLINK_COLOR=$(sed -n '4p' <<< "$RESOLVED")
+else
+    SOUND_ENABLED="true"
+    SOUNDFILE="$DEFAULT_SOUND"
+    BLINK_ENABLED="true"
+    BLINK_COLOR="$DEFAULT_COLOR"
 fi
 
 # --- Execute ---
